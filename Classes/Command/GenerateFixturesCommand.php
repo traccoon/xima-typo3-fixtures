@@ -108,7 +108,8 @@ class GenerateFixturesCommand extends Command
             return 0;
         }
 
-        $site = reset($sites);
+        usort($sites, static fn($a, $b) => $a->getRootPageId() <=> $b->getRootPageId());
+        $site = $sites[0];
         $rootPageId = $site->getRootPageId();
         $io->note(sprintf('Using root page of site "%s" (pid=%d).', $site->getIdentifier(), $rootPageId));
 
