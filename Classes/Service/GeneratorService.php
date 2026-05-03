@@ -157,6 +157,11 @@ class GeneratorService
             $scalarFields[$fieldName] = ($scalarFields[$fieldName] ?? 0) + 1;
         }
 
+        // Inline (IRRE) collection count fields
+        foreach ($variant->collections as $fieldName => $items) {
+            $scalarFields[$fieldName] = count($items);
+        }
+
         // Use variant label as CE header if no header field is set
         if (!isset($scalarFields['header'])) {
             $scalarFields['header'] = $variant->label;
@@ -174,7 +179,6 @@ class GeneratorService
             $scalarFields,
         );
 
-        // CType must come from the fixture field itself or be set by caller
         $connection = $this->connectionPool->getConnectionForTable('tt_content');
         $connection->insert('tt_content', $row);
         $contentElementUid = (int)$connection->lastInsertId();
@@ -182,10 +186,74 @@ class GeneratorService
         foreach ($fileReferences as $ref) {
             $this->createFileReference($contentElementUid, $ref);
         }
+
+        foreach ($variant->collections as $fieldName => $items) {
+            $this->createCollectionRecords($contentElementUid, $pid, $fieldName, $items);
+        }
     }
 
-    private function createFileReference(int $contentElementUid, FileFixtureReference $ref): void
+    /**
+     * Creates IRRE child records for an inline collection field.
+     * Looks up foreign_table and foreign_field from TCA to avoid hard-coding.
+     *
+     * @param array<int, array<string, mixed>> $items
+     */
+    private function createCollectionRecords(int $ceUid, int $pid, string $fieldName, array $items): void
     {
+        $tcaConfig = $GLOBALS['TCA']['tt_content']['columns'][$fieldName]['config'] ?? [];
+        if (($tcaConfig['type'] ?? '') !== 'inline') {
+            return;
+        }
+
+        $foreignTable = (string)($tcaConfig['foreign_table'] ?? '');
+        $foreignField = (string)($tcaConfig['foreign_field'] ?? 'foreign_table_parent_uid');
+        if ($foreignTable === '') {
+            return;
+        }
+
+        $connection = $this->connectionPool->getConnectionForTable($foreignTable);
+
+        foreach ($items as $sorting => $item) {
+            $fileReferences = [];
+            $scalarFields = [];
+
+            foreach ($item as $col => $value) {
+                if ($value instanceof FileFixtureReference) {
+                    $fileReferences[$col] = $value;
+                } else {
+                    $scalarFields[$col] = $value;
+                }
+            }
+
+            foreach ($fileReferences as $col => $ref) {
+                $scalarFields[$col] = ($scalarFields[$col] ?? 0) + 1;
+            }
+
+            $connection->insert($foreignTable, array_merge(
+                [
+                    'pid' => $pid,
+                    $foreignField => $ceUid,
+                    'sorting' => ($sorting + 1) * 256,
+                    'hidden' => 0,
+                    'tstamp' => time(),
+                    'crdate' => time(),
+                ],
+                $scalarFields,
+            ));
+
+            $childUid = (int)$connection->lastInsertId();
+
+            foreach ($fileReferences as $ref) {
+                $this->createFileReference($childUid, $ref, $foreignTable);
+            }
+        }
+    }
+
+    private function createFileReference(
+        int $recordUid,
+        FileFixtureReference $ref,
+        string $tableName = 'tt_content',
+    ): void {
         try {
             $file = $this->resourceFactory->retrieveFileOrFolderObject($ref->absolutePath);
         } catch (FileDoesNotExistException) {
@@ -198,8 +266,8 @@ class GeneratorService
 
         $this->connectionPool->getConnectionForTable('sys_file_reference')->insert('sys_file_reference', [
             'uid_local' => $file->getUid(),
-            'uid_foreign' => $contentElementUid,
-            'tablenames' => 'tt_content',
+            'uid_foreign' => $recordUid,
+            'tablenames' => $tableName,
             'fieldname' => $ref->fieldname,
             'table_local' => 'sys_file',
             'pid' => 0,

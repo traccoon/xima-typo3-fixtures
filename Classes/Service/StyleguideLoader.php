@@ -241,11 +241,32 @@ class StyleguideLoader
             if (!is_array($def) || !isset($def['label'])) {
                 continue;
             }
+
             $fields = [];
             foreach ((array)($def['fields'] ?? []) as $column => $value) {
                 $fields[(string)$column] = $this->resolveValue((string)$column, $value);
             }
-            $variants[] = new FixtureVariant((string)$def['label'], $fields);
+
+            $collections = [];
+            foreach ((array)($def['collections'] ?? []) as $fieldName => $items) {
+                if (!is_array($items)) {
+                    continue;
+                }
+                $rows = [];
+                foreach ($items as $item) {
+                    if (!is_array($item)) {
+                        continue;
+                    }
+                    $row = [];
+                    foreach ($item as $col => $value) {
+                        $row[(string)$col] = $this->resolveValue((string)$col, $value);
+                    }
+                    $rows[] = $row;
+                }
+                $collections[(string)$fieldName] = $rows;
+            }
+
+            $variants[] = new FixtureVariant((string)$def['label'], $fields, $collections);
         }
         return $variants;
     }
