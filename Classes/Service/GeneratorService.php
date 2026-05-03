@@ -368,7 +368,6 @@ class GeneratorService
             'uid_foreign' => $recordUid,
             'tablenames' => $tableName,
             'fieldname' => $ref->fieldname,
-            'table_local' => 'sys_file',
             'pid' => 0,
             'tstamp' => time(),
             'crdate' => time(),
