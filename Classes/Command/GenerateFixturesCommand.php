@@ -10,6 +10,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CMS\Core\Site\SiteFinder;
 use Xima\XimaTypo3Fixtures\Service\ContentBlocksLoader;
 use Xima\XimaTypo3Fixtures\Service\FixtureRegistry;
 use Xima\XimaTypo3Fixtures\Service\GeneratorService;
@@ -24,6 +25,7 @@ class GenerateFixturesCommand extends Command
         private readonly FixtureRegistry $fixtureRegistry,
         private readonly ContentBlocksLoader $contentBlocksLoader,
         private readonly GeneratorService $generatorService,
+        private readonly SiteFinder $siteFinder,
     ) {
         parent::__construct();
     }
@@ -35,8 +37,7 @@ class GenerateFixturesCommand extends Command
                 'pid',
                 null,
                 InputOption::VALUE_REQUIRED,
-                'Parent page UID under which the styleguide page is created (0 = root level)',
-                0,
+                'Parent page UID under which the styleguide page is created. Defaults to the root page of the first configured site.',
             )
             ->addOption(
                 'title',
@@ -73,11 +74,11 @@ class GenerateFixturesCommand extends Command
         }
 
         if (empty($fixtures)) {
-            $io->warning('No fixtures found. Add example properties to ContentBlocks fields or check built-in fixtures.');
+            $io->warning('No fixtures found. Add fixture properties to ContentBlocks fields or check built-in fixtures.');
             return Command::SUCCESS;
         }
 
-        $pid = (int)$input->getOption('pid');
+        $pid = $this->resolvePid($input, $io);
         $title = (string)$input->getOption('title');
 
         $io->text(sprintf('Generating %d fixture(s) on styleguide page "%s"...', count($fixtures), $title));
@@ -87,5 +88,30 @@ class GenerateFixturesCommand extends Command
         $io->success(sprintf('Styleguide page generated successfully (UID: %d).', $pageUid));
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Resolves the parent page UID.
+     * If --pid is given explicitly, use that value.
+     * Otherwise, auto-detect the root page of the first configured site.
+     */
+    private function resolvePid(InputInterface $input, SymfonyStyle $io): int
+    {
+        $pidOption = $input->getOption('pid');
+        if ($pidOption !== null) {
+            return (int)$pidOption;
+        }
+
+        $sites = $this->siteFinder->getAllSites();
+        if ($sites === []) {
+            $io->note('No site configuration found. Creating styleguide page at tree root (pid=0).');
+            return 0;
+        }
+
+        $site = reset($sites);
+        $rootPageId = $site->getRootPageId();
+        $io->note(sprintf('Using root page of site "%s" (pid=%d).', $site->getIdentifier(), $rootPageId));
+
+        return $rootPageId;
     }
 }
