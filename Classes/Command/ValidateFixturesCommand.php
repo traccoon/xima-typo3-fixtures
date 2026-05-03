@@ -44,6 +44,33 @@ class ValidateFixturesCommand extends Command
 
         foreach ($this->fixtureRegistry->getAllFixtures() as $fixture) {
             $errors = [];
+            $warnings = [];
+
+            // Collect all values used per field across all variants (for Select coverage)
+            $coveredValues = [];
+            foreach ($fixture->getVariants() as $variant) {
+                foreach ($variant->fields as $fieldName => $value) {
+                    $coveredValues[$fieldName][] = $value;
+                }
+            }
+
+            // ── Select-field coverage check ──────────────────────────────────
+            foreach ($coveredValues as $fieldName => $usedValues) {
+                $fieldConfig = $GLOBALS['TCA']['tt_content']['columns'][$fieldName]['config'] ?? [];
+                if (($fieldConfig['type'] ?? '') !== 'select') {
+                    continue;
+                }
+                $tcaItems = $fieldConfig['items'] ?? [];
+                $allValues = array_map(
+                    static fn($item) => (string)($item['value'] ?? $item[1] ?? ''),
+                    $tcaItems,
+                );
+                $allValues = array_filter($allValues, static fn($v) => $v !== '' && $v !== '--div--');
+                $usedStrings = array_map('strval', $usedValues);
+                foreach (array_diff($allValues, $usedStrings) as $missing) {
+                    $warnings[] = sprintf('Select "%s": value "%s" not covered by any variant', $fieldName, $missing);
+                }
+            }
 
             foreach ($fixture->getVariants() as $variant) {
                 // ── Scalar + file fields in tt_content ──────────────────────
@@ -109,17 +136,25 @@ class ValidateFixturesCommand extends Command
 
             if ($errors === []) {
                 $variantCount = count($fixture->getVariants());
+                $icon = $warnings !== [] ? '<comment>⚠</comment>' : '<info>✔</info>';
                 $io->writeln(sprintf(
-                    '  <info>✔</info> <options=bold>%s</> (%d variant%s)',
+                    '  %s <options=bold>%s</> (%d variant%s)',
+                    $icon,
                     $fixture->getCType(),
                     $variantCount,
                     $variantCount !== 1 ? 's' : '',
                 ));
+                foreach ($warnings as $warning) {
+                    $io->writeln('      <comment>↳ ' . $warning . '</comment>');
+                }
                 $totalOk++;
             } else {
                 $io->writeln(sprintf('  <error>✘</error> <options=bold>%s</>', $fixture->getCType()));
                 foreach ($errors as $error) {
                     $io->writeln('      <comment>' . $error . '</comment>');
+                }
+                foreach ($warnings as $warning) {
+                    $io->writeln('      <comment>↳ ' . $warning . '</comment>');
                 }
                 $totalErrors += count($errors);
             }

@@ -140,7 +140,7 @@ class StyleguideLoader
             return null;
         }
 
-        $variants = $this->buildVariants($config['variants'] ?? []);
+        $variants = $this->buildVariantsOrAxes($config);
         if (empty($variants)) {
             return null;
         }
@@ -177,7 +177,7 @@ class StyleguideLoader
                 continue;
             }
 
-            $variants = $this->buildVariants($entry['variants'] ?? []);
+            $variants = $this->buildVariantsOrAxes($entry);
             if (empty($variants)) {
                 continue;
             }
@@ -208,8 +208,8 @@ class StyleguideLoader
             return null;
         }
 
-        if (is_array($blockFixture) && isset($blockFixture['variants'])) {
-            $variants = $this->buildVariants($blockFixture['variants']);
+        if (is_array($blockFixture) && (isset($blockFixture['variants']) || isset($blockFixture['axes']))) {
+            $variants = $this->buildVariantsOrAxes($blockFixture);
         } else {
             $variants = $this->buildFieldLevelVariants($config);
         }
@@ -229,6 +229,113 @@ class StyleguideLoader
     }
 
     // ── Shared variant building ───────────────────────────────────────────────
+
+    /**
+     * Dispatches to buildVariants() or buildFromAxes() depending on which key is present.
+     * If `axes:` is set it takes precedence; `variants:` is used as fallback.
+     *
+     * @param array<string, mixed> $config
+     * @return FixtureVariant[]
+     */
+    private function buildVariantsOrAxes(array $config): array
+    {
+        if (!empty($config['axes'])) {
+            return $this->buildFromAxes(
+                (array)$config['axes'],
+                (array)($config['fields'] ?? []),
+                (array)($config['collections'] ?? []),
+            );
+        }
+        return $this->buildVariants($config['variants'] ?? []);
+    }
+
+    /**
+     * Generates variants as the cartesian product of the given axes.
+     *
+     * Example YAML:
+     *   axes:
+     *     - field: imageorient
+     *       values: [0, 8, 17, 18]
+     *     - field: imagecolumns
+     *       values: [1, 2, 4]
+     *   fields:
+     *     bodytext: 'EXT:…/lorem-short.txt'
+     *     assets:   'EXT:…/placeholder.jpg'
+     *
+     * Produces 4 × 3 = 12 variants with labels like "imageorient: 0 | imagecolumns: 1".
+     *
+     * @param array<int, array{field: string, values: list<mixed>}> $axes
+     * @param array<string, mixed> $baseFieldDefs   Raw YAML field values (unresolved)
+     * @param array<string, mixed> $baseCollectionDefs  Raw YAML collection definitions
+     * @return FixtureVariant[]
+     */
+    private function buildFromAxes(array $axes, array $baseFieldDefs, array $baseCollectionDefs): array
+    {
+        if ($axes === []) {
+            return [];
+        }
+
+        // Resolve base fields once
+        $baseFields = [];
+        foreach ($baseFieldDefs as $col => $value) {
+            $baseFields[(string)$col] = $this->resolveValue((string)$col, $value);
+        }
+
+        // Resolve base collections once (same logic as buildVariants)
+        $baseCollections = [];
+        foreach ($baseCollectionDefs as $fieldName => $items) {
+            if (!is_array($items)) {
+                continue;
+            }
+            $rows = [];
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $row = [];
+                foreach ($item as $col => $value) {
+                    $row[(string)$col] = $this->resolveValue((string)$col, $value);
+                }
+                $rows[] = $row;
+            }
+            $baseCollections[(string)$fieldName] = $rows;
+        }
+
+        // Build cartesian product
+        $combinations = [[]];
+        foreach ($axes as $axis) {
+            $field = (string)($axis['field'] ?? '');
+            $values = (array)($axis['values'] ?? []);
+            if ($field === '' || $values === []) {
+                continue;
+            }
+            $next = [];
+            foreach ($combinations as $combo) {
+                foreach ($values as $value) {
+                    $next[] = array_merge($combo, [$field => $value]);
+                }
+            }
+            $combinations = $next;
+        }
+
+        $variants = [];
+        foreach ($combinations as $combo) {
+            if ($combo === []) {
+                continue;
+            }
+            $labelParts = [];
+            foreach ($combo as $field => $value) {
+                $labelParts[] = $field . ': ' . $value;
+            }
+            $variants[] = new FixtureVariant(
+                implode(' | ', $labelParts),
+                array_merge($baseFields, $combo),
+                $baseCollections,
+            );
+        }
+
+        return $variants;
+    }
 
     /**
      * @param array<mixed> $variantDefinitions
