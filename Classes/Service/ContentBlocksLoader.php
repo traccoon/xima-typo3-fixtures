@@ -70,7 +70,7 @@ class ContentBlocksLoader
             return null;
         }
 
-        $cType = $this->deriveCType($config['name']);
+        $cType = isset($config['typeName']) ? (string)$config['typeName'] : $this->deriveCType($config['name']);
         $label = $config['title'] ?? $config['name'];
 
         return new class($cType, $label, $fields) implements FixtureInterface {
