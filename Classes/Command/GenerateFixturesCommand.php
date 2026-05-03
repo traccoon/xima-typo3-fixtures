@@ -11,9 +11,9 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CMS\Core\Site\SiteFinder;
-use Xima\XimaTypo3Fixtures\Service\ContentBlocksLoader;
 use Xima\XimaTypo3Fixtures\Service\FixtureRegistry;
 use Xima\XimaTypo3Fixtures\Service\GeneratorService;
+use Xima\XimaTypo3Fixtures\Service\StyleguideLoader;
 
 #[AsCommand(
     name: 'fixtures:generate',
@@ -23,7 +23,7 @@ class GenerateFixturesCommand extends Command
 {
     public function __construct(
         private readonly FixtureRegistry $fixtureRegistry,
-        private readonly ContentBlocksLoader $contentBlocksLoader,
+        private readonly StyleguideLoader $styleguideLoader,
         private readonly GeneratorService $generatorService,
         private readonly SiteFinder $siteFinder,
     ) {
@@ -58,7 +58,7 @@ class GenerateFixturesCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
 
-        foreach ($this->contentBlocksLoader->loadFixtures() as $fixture) {
+        foreach ($this->styleguideLoader->loadFixtures() as $fixture) {
             $this->fixtureRegistry->addFixture($fixture);
         }
 
@@ -74,7 +74,7 @@ class GenerateFixturesCommand extends Command
         }
 
         if (empty($fixtures)) {
-            $io->warning('No fixtures found. Add fixture properties to ContentBlocks fields or check built-in fixtures.');
+            $io->warning('No fixtures found. Add a styleguide.yaml next to your ContentBlocks config.yaml, a Configuration/Styleguide.yaml, or check built-in fixtures.');
             return Command::SUCCESS;
         }
 
