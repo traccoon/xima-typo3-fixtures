@@ -11,6 +11,12 @@ interface FixtureInterface
     public function getLabel(): string;
 
     /**
+     * Returns the group identifier used to group fixtures into subpages.
+     * Core fixtures return 'core'; ContentBlocks fixtures return the block's group.
+     */
+    public function getGroup(): string;
+
+    /**
      * Returns the tt_content field values for this fixture.
      *
      * @return array<string, mixed>

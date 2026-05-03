@@ -72,11 +72,13 @@ class ContentBlocksLoader
 
         $cType = isset($config['typeName']) ? (string)$config['typeName'] : $this->deriveCType($config['name']);
         $label = $config['title'] ?? $config['name'];
+        $group = isset($config['group']) ? (string)$config['group'] : 'content-elements';
 
-        return new class($cType, $label, $fields) implements FixtureInterface {
+        return new class($cType, $label, $group, $fields) implements FixtureInterface {
             public function __construct(
                 private readonly string $cType,
                 private readonly string $label,
+                private readonly string $group,
                 private readonly array $fields,
             ) {}
 
@@ -88,6 +90,11 @@ class ContentBlocksLoader
             public function getLabel(): string
             {
                 return $this->label;
+            }
+
+            public function getGroup(): string
+            {
+                return $this->group;
             }
 
             public function getFields(): array

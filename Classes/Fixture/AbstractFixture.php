@@ -14,4 +14,9 @@ abstract class AbstractFixture implements FixtureInterface
     {
         return $this->getCType();
     }
+
+    public function getGroup(): string
+    {
+        return 'core';
+    }
 }

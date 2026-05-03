@@ -19,36 +19,52 @@ class GeneratorService
     ) {}
 
     /**
-     * Generates the styleguide page with content elements for all given fixtures.
-     * Reuses an existing page with the given title under $pid if one exists.
-     * Returns the UID of the styleguide page.
+     * Generates the styleguide page tree:
+     *   /_styleguide              ← root container page
+     *     /_styleguide/core       ← subpage per group
+     *     /_styleguide/my-group
+     *     …
+     *
+     * Returns the UID of the root styleguide page.
      *
      * @param FixtureInterface[] $fixtures
      */
-    public function generate(array $fixtures, int $pid = 0, string $title = 'Styleguide'): int
+    public function generate(array $fixtures, int $pid = 1, string $title = 'Styleguide'): int
     {
-        $styleguidePageUid = $this->getOrCreateStyleguidePage($pid, $title);
-        if ($styleguidePageUid === 0) {
+        $rootUid = $this->getOrCreatePage($pid, $title, $this->buildRootSlug($title));
+        if ($rootUid === 0) {
             return 0;
         }
 
-        $this->clearExistingContent($styleguidePageUid);
-
+        // Group fixtures by their group identifier
+        $groups = [];
         foreach ($fixtures as $fixture) {
-            $this->createContentElement($styleguidePageUid, $fixture);
+            $groups[$fixture->getGroup()][] = $fixture;
         }
 
-        return $styleguidePageUid;
+        foreach ($groups as $group => $groupFixtures) {
+            $groupTitle = $this->formatGroupTitle($group);
+            $groupSlug = $this->buildRootSlug($title) . '/' . $this->slugify($group);
+            $groupUid = $this->getOrCreatePage($rootUid, $groupTitle, $groupSlug);
+            if ($groupUid === 0) {
+                continue;
+            }
+            $this->clearExistingContent($groupUid);
+            foreach ($groupFixtures as $fixture) {
+                $this->createContentElement($groupUid, $fixture);
+            }
+        }
+
+        return $rootUid;
     }
 
-    private function getOrCreateStyleguidePage(int $pid, string $title): int
+    private function getOrCreatePage(int $pid, string $title, string $slug): int
     {
-        $existingUid = $this->findStyleguidePage($pid, $title);
+        $existingUid = $this->findPage($pid, $title);
         if ($existingUid > 0) {
-            // Ensure slug is correct even if the page was created by an older version
             $this->connectionPool->getConnectionForTable('pages')->update(
                 'pages',
-                ['slug' => $this->buildSlug($pid, $title), 'tstamp' => time()],
+                ['slug' => $slug, 'tstamp' => time()],
                 ['uid' => $existingUid],
             );
             return $existingUid;
@@ -58,7 +74,7 @@ class GeneratorService
         $connection->insert('pages', [
             'pid' => $pid,
             'title' => $title,
-            'slug' => $this->buildSlug($pid, $title),
+            'slug' => $slug,
             'hidden' => 0,
             'doktype' => 1,
             'sorting' => 256,
@@ -69,17 +85,7 @@ class GeneratorService
         return (int)$connection->lastInsertId();
     }
 
-    private function buildSlug(int $pid, string $title): string
-    {
-        if ($pid === 0) {
-            return '/';
-        }
-
-        $segment = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $title) ?? $title);
-        return '/' . trim($segment, '-');
-    }
-
-    private function findStyleguidePage(int $pid, string $title): int
+    private function findPage(int $pid, string $title): int
     {
         $queryBuilder = $this->connectionPool->getQueryBuilderForTable('pages');
         $queryBuilder->getRestrictions()->removeAll();
@@ -99,8 +105,7 @@ class GeneratorService
 
     private function clearExistingContent(int $pid): void
     {
-        $connection = $this->connectionPool->getConnectionForTable('tt_content');
-        $connection->update(
+        $this->connectionPool->getConnectionForTable('tt_content')->update(
             'tt_content',
             ['deleted' => 1],
             ['pid' => $pid, 'deleted' => 0],
@@ -111,7 +116,6 @@ class GeneratorService
     {
         $allFields = $fixture->getFields();
 
-        // Separate file references from plain scalar fields
         $fileReferences = [];
         $scalarFields = [];
         foreach ($allFields as $fieldName => $value) {
@@ -122,7 +126,6 @@ class GeneratorService
             }
         }
 
-        // Pre-fill the file count fields so the CE renders the correct number of assets
         foreach ($fileReferences as $fieldName => $ref) {
             $scalarFields[$fieldName] = ($scalarFields[$fieldName] ?? 0) + 1;
         }
@@ -148,9 +151,6 @@ class GeneratorService
         }
     }
 
-    /**
-     * Indexes the file in FAL (if not already) and creates a sys_file_reference record.
-     */
     private function createFileReference(int $contentElementUid, FileFixtureReference $ref): void
     {
         try {
@@ -174,5 +174,34 @@ class GeneratorService
             'crdate' => time(),
             'sorting_foreign' => 1,
         ]);
+    }
+
+    /**
+     * Builds the root slug: /_styleguide (with underscore prefix).
+     */
+    private function buildRootSlug(string $title): string
+    {
+        return '/_' . $this->slugify($title);
+    }
+
+    /**
+     * Converts a string to a URL-safe slug segment.
+     * Example: "dkfz_common" → "dkfz-common", "My Group" → "my-group"
+     */
+    private function slugify(string $value): string
+    {
+        $slug = strtolower($value);
+        $slug = str_replace('_', '-', $slug);
+        $slug = (string)preg_replace('/[^a-z0-9-]+/', '-', $slug);
+        return trim($slug, '-');
+    }
+
+    /**
+     * Converts a group identifier to a human-readable title.
+     * Example: "dkfz_common" → "Dkfz Common", "core" → "Core"
+     */
+    private function formatGroupTitle(string $group): string
+    {
+        return ucwords(str_replace(['_', '-'], ' ', $group));
     }
 }
