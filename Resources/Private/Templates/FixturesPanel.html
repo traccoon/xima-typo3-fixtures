@@ -4,14 +4,18 @@
 [data-xfp-toggle]{all:unset;display:flex;align-items:center;gap:7px;background:#18181b;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;box-shadow:0 2px 12px rgba(0,0,0,.45);white-space:nowrap;user-select:none}
 [data-xfp-toggle]:hover{background:#27272a}
 [data-xfp-toggle] svg{flex-shrink:0;opacity:.7}
-[data-xfp-panel]{position:absolute;bottom:calc(100% + 8px);right:0;background:#18181b;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;min-width:220px;max-height:70vh;display:none;flex-direction:column}
+[data-xfp-panel]{position:absolute;bottom:calc(100% + 8px);right:0;background:#18181b;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;min-width:240px;max-height:70vh;display:none;flex-direction:column}
 [data-xfp][open] [data-xfp-panel]{display:flex}
 [data-xfp-header]{padding:10px 14px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0}
 [data-xfp-list]{list-style:none;margin:0;padding:5px 0;overflow-y:auto;flex:1}
-[data-xfp-list] li a{display:flex;align-items:center;gap:8px;padding:7px 14px;color:rgba(255,255,255,.8);text-decoration:none;font-family:ui-monospace,"SF Mono","Cascadia Code",monospace;font-size:12px}
-[data-xfp-list] li a:hover{background:rgba(255,255,255,.07);color:#fff}
-[data-xfp-list] li a::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);flex-shrink:0}
-[data-xfp-list] li a:hover::before{background:#6366f1}
+[data-xfp-list] li{display:flex;align-items:center}
+[data-xfp-list] li a[data-xfp-jump]{display:flex;align-items:center;gap:8px;flex:1;padding:7px 8px 7px 14px;color:rgba(255,255,255,.8);text-decoration:none;font-family:ui-monospace,"SF Mono","Cascadia Code",monospace;font-size:12px;min-width:0}
+[data-xfp-list] li a[data-xfp-jump]:hover{background:rgba(255,255,255,.07);color:#fff}
+[data-xfp-list] li a[data-xfp-jump]::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);flex-shrink:0}
+[data-xfp-list] li a[data-xfp-jump]:hover::before{background:#6366f1}
+[data-xfp-list] li a[data-xfp-jump] span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-xfp-edit]{display:flex;align-items:center;padding:7px 12px 7px 4px;color:rgba(255,255,255,.25);text-decoration:none;flex-shrink:0;transition:color .15s}
+[data-xfp-edit]:hover{color:#6366f1}
 </style>
 
 <div data-xfp>
@@ -41,12 +45,33 @@
     frames.forEach(function (frame) {
         var match = frame.className.match(/frame-type-(\S+)/);
         var ctype = match ? match[1] : frame.id;
-        var a = document.createElement('a');
-        a.href = '#' + frame.id;
-        a.textContent = ctype;
-        a.addEventListener('click', function () { root.removeAttribute('open'); });
+        var heading = frame.querySelector('h1,h2,h3,h4,h5');
+        var label = (heading && heading.textContent.trim()) ? heading.textContent.trim() : ctype;
+        var uid = frame.id.replace(/^c/, '');
+
+        var jump = document.createElement('a');
+        jump.href = '#' + frame.id;
+        jump.setAttribute('data-xfp-jump', '');
+        var dot = document.createElement('span');
+        dot.setAttribute('aria-hidden', 'true');
+        var text = document.createElement('span');
+        text.textContent = label;
+        text.title = label;
+        jump.appendChild(dot);
+        jump.appendChild(text);
+        jump.addEventListener('click', function () { root.removeAttribute('open'); });
+
+        var edit = document.createElement('a');
+        edit.href = '/typo3/record/edit?edit[tt_content][' + uid + ']=edit';
+        edit.target = '_blank';
+        edit.rel = 'noopener noreferrer';
+        edit.setAttribute('data-xfp-edit', '');
+        edit.title = 'Edit in backend (uid=' + uid + ')';
+        edit.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207zM5 13v-.5a.5.5 0 0 0-.5-.5H4v-.5a.5.5 0 0 0-.5-.5H3v-.5a.5.5 0 0 0-.5-.5H2v-.5a.499.499 0 0 0-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11z"/></svg>';
+
         var li = document.createElement('li');
-        li.appendChild(a);
+        li.appendChild(jump);
+        li.appendChild(edit);
         list.appendChild(li);
     });
     toggle.addEventListener('click', function (e) {
