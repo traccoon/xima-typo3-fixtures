@@ -13,6 +13,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Site\SiteFinder;
+use Xima\XimaTypo3Fixtures\Service\GeneratorService;
 
 #[AsCommand(
     name: 'fixtures:clean',
@@ -23,6 +24,7 @@ class CleanFixturesCommand extends Command
     public function __construct(
         private readonly ConnectionPool $connectionPool,
         private readonly SiteFinder $siteFinder,
+        private readonly GeneratorService $generatorService,
     ) {
         parent::__construct();
     }
@@ -61,14 +63,8 @@ class CleanFixturesCommand extends Command
         $descendantUids = $this->collectDescendantUids($rootUid);
         $allPageUids = array_merge([$rootUid], $descendantUids);
 
-        $ceCount = 0;
-        foreach ($allPageUids as $pageUid) {
-            $ceCount += $this->connectionPool->getConnectionForTable('tt_content')->update(
-                'tt_content',
-                ['deleted' => 1],
-                ['pid' => $pageUid, 'deleted' => 0],
-            );
-        }
+        // Delete tt_content records with all their relations (collection items + file references)
+        $ceCount = $this->generatorService->deleteContentOnPages($allPageUids);
 
         foreach ($allPageUids as $pageUid) {
             $this->connectionPool->getConnectionForTable('pages')->update(

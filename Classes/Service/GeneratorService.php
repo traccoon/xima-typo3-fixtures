@@ -133,11 +133,115 @@ class GeneratorService
 
     private function clearExistingContent(int $pid): void
     {
+        foreach ($this->getContentUidsOnPage($pid) as $ceUid) {
+            $this->deleteRecordRelations($ceUid, 'tt_content');
+        }
+
         $this->connectionPool->getConnectionForTable('tt_content')->update(
             'tt_content',
             ['deleted' => 1],
             ['pid' => $pid, 'deleted' => 0],
         );
+    }
+
+    /**
+     * Soft-deletes all tt_content records on the given pages, plus their
+     * collection children and sys_file_reference entries.
+     * Called by CleanFixturesCommand.
+     *
+     * @param int[] $pageUids
+     * @return int number of deleted tt_content records
+     */
+    public function deleteContentOnPages(array $pageUids): int
+    {
+        $total = 0;
+        foreach ($pageUids as $pid) {
+            $ceUids = $this->getContentUidsOnPage($pid);
+            foreach ($ceUids as $ceUid) {
+                $this->deleteRecordRelations($ceUid, 'tt_content');
+            }
+            $total += $this->connectionPool->getConnectionForTable('tt_content')->update(
+                'tt_content',
+                ['deleted' => 1],
+                ['pid' => $pid, 'deleted' => 0],
+            );
+        }
+        return $total;
+    }
+
+    /**
+     * Recursively soft-deletes all relations of a record:
+     *   – sys_file_reference rows pointing to it
+     *   – IRRE child records (and their own file references)
+     */
+    private function deleteRecordRelations(int $uid, string $table): void
+    {
+        // 1. Soft-delete FAL references for this record
+        $this->connectionPool->getConnectionForTable('sys_file_reference')->update(
+            'sys_file_reference',
+            ['deleted' => 1],
+            ['uid_foreign' => $uid, 'tablenames' => $table, 'deleted' => 0],
+        );
+
+        // 2. Soft-delete IRRE child records and their own file references
+        foreach ($GLOBALS['TCA'][$table]['columns'] ?? [] as $column) {
+            $config = $column['config'] ?? [];
+            if (($config['type'] ?? '') !== 'inline') {
+                continue;
+            }
+
+            $foreignTable = (string)($config['foreign_table'] ?? '');
+            $foreignField = (string)($config['foreign_field'] ?? '');
+            if ($foreignTable === '' || $foreignField === '') {
+                continue;
+            }
+
+            foreach ($this->getInlineChildUids($foreignTable, $foreignField, $uid) as $childUid) {
+                $this->deleteRecordRelations($childUid, $foreignTable);
+            }
+
+            $this->connectionPool->getConnectionForTable($foreignTable)->update(
+                $foreignTable,
+                ['deleted' => 1],
+                [$foreignField => $uid, 'deleted' => 0],
+            );
+        }
+    }
+
+    /**
+     * @return int[]
+     */
+    private function getContentUidsOnPage(int $pid): array
+    {
+        $qb = $this->connectionPool->getQueryBuilderForTable('tt_content');
+        $qb->getRestrictions()->removeAll();
+        return array_map('intval', $qb
+            ->select('uid')
+            ->from('tt_content')
+            ->where(
+                $qb->expr()->eq('pid', $qb->createNamedParameter($pid, Connection::PARAM_INT)),
+                $qb->expr()->eq('deleted', $qb->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->executeQuery()
+            ->fetchFirstColumn());
+    }
+
+    /**
+     * @return int[]
+     */
+    private function getInlineChildUids(string $foreignTable, string $foreignField, int $parentUid): array
+    {
+        $qb = $this->connectionPool->getQueryBuilderForTable($foreignTable);
+        $qb->getRestrictions()->removeAll();
+        return array_map('intval', $qb
+            ->select('uid')
+            ->from($foreignTable)
+            ->where(
+                $qb->expr()->eq($foreignField, $qb->createNamedParameter($parentUid, Connection::PARAM_INT)),
+                $qb->expr()->eq('deleted', $qb->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->executeQuery()
+            ->fetchFirstColumn());
     }
 
     private function createContentElement(int $pid, string $cType, FixtureVariant $variant): void

@@ -46,25 +46,74 @@ class ValidateFixturesCommand extends Command
             $errors = [];
 
             foreach ($fixture->getVariants() as $variant) {
+                // ── Scalar + file fields in tt_content ──────────────────────
                 foreach (array_keys($variant->fields) as $fieldName) {
                     if (!in_array($fieldName, $tcaColumns, true)) {
-                        $suggestion = $this->findClosestMatch($fieldName, $tcaColumns);
                         $errors[] = sprintf(
                             'Variant "%s": field "%s" not found in tt_content%s',
                             $variant->label,
                             $fieldName,
-                            $suggestion !== null ? sprintf(' — did you mean "%s"?', $suggestion) : '',
+                            $this->suggest($fieldName, $tcaColumns),
                         );
+                    }
+                }
+
+                // ── Collection (IRRE) fields ─────────────────────────────────
+                foreach ($variant->collections as $fieldName => $items) {
+                    // Is the field present in tt_content and of type inline?
+                    if (!in_array($fieldName, $tcaColumns, true)) {
+                        $errors[] = sprintf(
+                            'Variant "%s": collection field "%s" not found in tt_content%s',
+                            $variant->label,
+                            $fieldName,
+                            $this->suggest($fieldName, $tcaColumns),
+                        );
+                        continue;
+                    }
+
+                    $config = $GLOBALS['TCA']['tt_content']['columns'][$fieldName]['config'] ?? [];
+                    if (($config['type'] ?? '') !== 'inline') {
+                        $errors[] = sprintf(
+                            'Variant "%s": field "%s" is not an inline field in tt_content TCA (type: %s)',
+                            $variant->label,
+                            $fieldName,
+                            $config['type'] ?? 'unknown',
+                        );
+                        continue;
+                    }
+
+                    $foreignTable = (string)($config['foreign_table'] ?? '');
+                    if ($foreignTable === '') {
+                        continue;
+                    }
+
+                    $foreignColumns = array_keys($GLOBALS['TCA'][$foreignTable]['columns'] ?? []);
+
+                    foreach ($items as $i => $item) {
+                        foreach (array_keys($item) as $col) {
+                            if (!in_array($col, $foreignColumns, true)) {
+                                $errors[] = sprintf(
+                                    'Variant "%s", collection "%s" item #%d: field "%s" not found in %s%s',
+                                    $variant->label,
+                                    $fieldName,
+                                    $i + 1,
+                                    $col,
+                                    $foreignTable,
+                                    $this->suggest($col, $foreignColumns),
+                                );
+                            }
+                        }
                     }
                 }
             }
 
             if ($errors === []) {
+                $variantCount = count($fixture->getVariants());
                 $io->writeln(sprintf(
                     '  <info>✔</info> <options=bold>%s</> (%d variant%s)',
                     $fixture->getCType(),
-                    count($fixture->getVariants()),
-                    count($fixture->getVariants()) !== 1 ? 's' : '',
+                    $variantCount,
+                    $variantCount !== 1 ? 's' : '',
                 ));
                 $totalOk++;
             } else {
@@ -80,9 +129,8 @@ class ValidateFixturesCommand extends Command
 
         if ($totalErrors > 0) {
             $io->error(sprintf(
-                '%d field error(s) across %d fixture(s). Fix the field names in your styleguide.yaml.',
+                '%d field error(s) found. Fix the field names in your styleguide.yaml.',
                 $totalErrors,
-                count($this->fixtureRegistry->getAllFixtures()),
             ));
             return Command::FAILURE;
         }
@@ -92,12 +140,11 @@ class ValidateFixturesCommand extends Command
     }
 
     /**
-     * Returns the closest TCA column name if within an acceptable edit distance,
-     * null otherwise.
+     * Returns a " — did you mean X?" hint string, or empty string if no close match found.
      *
      * @param string[] $candidates
      */
-    private function findClosestMatch(string $field, array $candidates): ?string
+    private function suggest(string $field, array $candidates): string
     {
         $best = null;
         $bestDistance = PHP_INT_MAX;
@@ -111,6 +158,6 @@ class ValidateFixturesCommand extends Command
             }
         }
 
-        return $best;
+        return $best !== null ? sprintf(' — did you mean "%s"?', $best) : '';
     }
 }
