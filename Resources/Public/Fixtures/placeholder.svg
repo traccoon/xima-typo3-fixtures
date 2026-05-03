@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <rect width="400" height="300" fill="#e4e4e7"/>
+  <rect x="160" y="110" width="80" height="60" rx="4" fill="#a1a1aa"/>
+  <circle cx="175" cy="125" r="8" fill="#d4d4d8"/>
+  <polyline points="160,170 190,140 215,158 235,135 260,170" fill="none" stroke="#a1a1aa" stroke-width="3" stroke-linejoin="round"/>
+  <text x="200" y="205" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" fill="#71717a" text-anchor="middle">400 × 300</text>
+</svg>

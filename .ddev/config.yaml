@@ -1,0 +1,27 @@
+name: xima-typo3-fixtures
+type: typo3
+docroot: public
+php_version: "8.3"
+webserver_type: nginx-fpm
+xdebug_enabled: false
+additional_hostnames: []
+additional_fqdns: []
+webimage_extra_packages: [libxml2-utils]
+database:
+    type: mariadb
+    version: "10.11"
+use_dns_when_possible: true
+composer_version: "2"
+web_environment: []
+corepack_enable: false
+
+hooks:
+  post-start:
+    - exec: vendor/bin/typo3 asset:publish --quiet
+    - exec: |
+        mkdir -p /var/www/html/public/_assets
+        assetHash=$(php -r "echo md5(substr('/var/www/html/', strlen('/var/www/html')));")
+        assetTarget="/var/www/html/public/_assets/${assetHash}"
+        if [ ! -e "$assetTarget" ]; then
+          ln -s /var/www/html/Resources/Public "$assetTarget"
+        fi

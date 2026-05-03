@@ -1,0 +1,64 @@
+<html xmlns:f="http://typo3.org/ns/TYPO3/CMS/Fluid/ViewHelpers" data-namespace-typo3-fluid="true"><f:spaceless>
+<style>
+[data-xfp]{all:initial;position:fixed;bottom:1.5rem;right:1.5rem;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:13px;line-height:1.4}
+[data-xfp-toggle]{all:unset;display:flex;align-items:center;gap:7px;background:#18181b;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;box-shadow:0 2px 12px rgba(0,0,0,.45);white-space:nowrap;user-select:none}
+[data-xfp-toggle]:hover{background:#27272a}
+[data-xfp-toggle] svg{flex-shrink:0;opacity:.7}
+[data-xfp-panel]{position:absolute;bottom:calc(100% + 8px);right:0;background:#18181b;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;min-width:220px;max-height:70vh;display:none;flex-direction:column}
+[data-xfp][open] [data-xfp-panel]{display:flex}
+[data-xfp-header]{padding:10px 14px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0}
+[data-xfp-list]{list-style:none;margin:0;padding:5px 0;overflow-y:auto;flex:1}
+[data-xfp-list] li a{display:flex;align-items:center;gap:8px;padding:7px 14px;color:rgba(255,255,255,.8);text-decoration:none;font-family:ui-monospace,"SF Mono","Cascadia Code",monospace;font-size:12px}
+[data-xfp-list] li a:hover{background:rgba(255,255,255,.07);color:#fff}
+[data-xfp-list] li a::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);flex-shrink:0}
+[data-xfp-list] li a:hover::before{background:#6366f1}
+</style>
+
+<div data-xfp>
+    <div data-xfp-panel>
+        <div data-xfp-header>Content Elements</div>
+        <ul data-xfp-list></ul>
+    </div>
+    <button data-xfp-toggle type="button">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <rect x="1" y="1" width="6" height="6" rx="1"/>
+            <rect x="9" y="1" width="6" height="6" rx="1"/>
+            <rect x="1" y="9" width="6" height="6" rx="1"/>
+            <rect x="9" y="9" width="6" height="6" rx="1"/>
+        </svg>
+        Fixtures
+    </button>
+</div>
+
+<script>
+(function () {
+    var root = document.querySelector('[data-xfp]');
+    if (!root) return;
+    var list = root.querySelector('[data-xfp-list]');
+    var toggle = root.querySelector('[data-xfp-toggle]');
+    var frames = document.querySelectorAll('.frame[id][class*="frame-type-"]');
+    if (!frames.length) { root.hidden = true; return; }
+    frames.forEach(function (frame) {
+        var match = frame.className.match(/frame-type-(\S+)/);
+        var ctype = match ? match[1] : frame.id;
+        var a = document.createElement('a');
+        a.href = '#' + frame.id;
+        a.textContent = ctype;
+        a.addEventListener('click', function () { root.removeAttribute('open'); });
+        var li = document.createElement('li');
+        li.appendChild(a);
+        list.appendChild(li);
+    });
+    toggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        root.toggleAttribute('open');
+    });
+    document.addEventListener('click', function (e) {
+        if (!root.contains(e.target)) root.removeAttribute('open');
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') root.removeAttribute('open');
+    });
+})();
+</script>
+</f:spaceless></html>

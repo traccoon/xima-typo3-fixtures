@@ -1,0 +1,17 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+    public: false
+
+  Xima\XimaTypo3Fixtures\:
+    resource: '../Classes/*'
+
+  _instanceof:
+    Xima\XimaTypo3Fixtures\Fixture\FixtureInterface:
+      tags:
+        - name: xima.typo3fixtures.fixture
+
+  Xima\XimaTypo3Fixtures\Service\FixtureRegistry:
+    arguments:
+      $fixtures: !tagged_iterator xima.typo3fixtures.fixture

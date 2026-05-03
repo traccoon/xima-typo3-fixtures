@@ -1,0 +1,5 @@
+page.footerData.900 = FLUIDTEMPLATE
+page.footerData.900 {
+    templateName = FixturesPanel
+    templateRootPaths.0 = EXT:xima_typo3_fixtures/Resources/Private/Templates/
+}

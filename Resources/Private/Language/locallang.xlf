@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+	<file source-language="en" datatype="plaintext" original="EXT:xima_typo3_fixtures/Resources/Private/Language/locallang.xlf">
+		<body>
+			<trans-unit id="tx_ximatypo3fixtures">
+				<source>Fixtures</source>
+			</trans-unit>
+		</body>
+	</file>
+</xliff>

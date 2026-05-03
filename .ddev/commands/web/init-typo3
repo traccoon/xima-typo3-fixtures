@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2086
+set -e
+
+## Description: Initialize TYPO3 installation
+## Usage: init-typo3
+## Example: ddev init-typo3
+
+readonly dbHost="db"
+readonly dbUser="db"
+readonly dbPassword="db"
+readonly dbName="db"
+readonly dbCredentials="-h${dbHost} -u${dbUser} -p${dbPassword}"
+readonly typo3Binary="/var/www/html/vendor/bin/typo3"
+
+function _progress() {
+    printf "%s... " "$1"
+}
+
+function _done() {
+    printf "\e[32mDone\e[39m\n"
+}
+
+# Regenerate composer package artifact so resource definitions are up to date
+_progress "Regenerating composer package artifact"
+    composer --working-dir=/var/www/html install --quiet
+_done
+
+# Create empty database
+_progress "Creating empty database"
+mysql -Nse "SHOW TABLES" $dbCredentials "$dbName" | while read -r table; do
+    mysql -e "DROP TABLE ${table}" $dbCredentials "$dbName"
+done
+_done
+
+# Prepare setup environment
+export TYPO3_DB_DRIVER=mysqli
+export TYPO3_DB_USERNAME="$dbUser"
+export TYPO3_DB_PASSWORD="$dbPassword"
+export TYPO3_DB_PORT=3306
+export TYPO3_DB_HOST="$dbHost"
+export TYPO3_DB_DBNAME="$dbName"
+export TYPO3_SERVER_TYPE=apache
+export TYPO3_PROJECT_NAME="EXT:xima_typo3_fixtures"
+export TYPO3_SETUP_ADMIN_USERNAME=admin
+export TYPO3_SETUP_ADMIN_PASSWORD='Passw0rd!'
+export TYPO3_SETUP_ADMIN_EMAIL=admin@example.com
+
+# Set up environment
+_progress "Setting up TYPO3 installation"
+    "$typo3Binary" setup --no-interaction --force --quiet
+_done
+
+# Publish extension assets
+_progress "Publishing extension assets"
+    "$typo3Binary" asset:publish --quiet
+_done
+
+# Publish root package assets (asset:publish skips the root package)
+_progress "Publishing root package assets"
+    mkdir -p /var/www/html/public/_assets
+    assetHash=$(php -r "echo md5(substr('/var/www/html/', strlen('/var/www/html')));")
+    assetTarget="/var/www/html/public/_assets/${assetHash}"
+    if [ ! -e "$assetTarget" ]; then
+        ln -s /var/www/html/Resources/Public "$assetTarget"
+    fi
+_done
+
+# Generate styleguide page with all built-in fixtures
+_progress "Generating styleguide fixtures"
+    "$typo3Binary" fixtures:generate --pid=0 --quiet
+_done
