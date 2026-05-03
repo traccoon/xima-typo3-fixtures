@@ -41,7 +41,7 @@ class GeneratorService
     public function generate(array $fixtures, int $pid = 1, string $title = 'Styleguide'): int
     {
         $this->generationErrors = [];
-        $this->ensureBackendUser();
+        $this->ensureBackendUser(); // bootstrap fake admin early so DataHandler can use it
 
         $rootSlug = '/_' . $this->slugify($title);
         $rootUid = $this->getOrCreatePage($pid, $title, $rootSlug);
@@ -307,7 +307,7 @@ class GeneratorService
         ];
 
         $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start($datamap, []);
+        $dataHandler->start($datamap, [], $this->ensureBackendUser());
         $dataHandler->process_datamap();
 
         if ($dataHandler->errorLog !== []) {
@@ -384,7 +384,7 @@ class GeneratorService
             ];
 
             $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-            $dataHandler->start($datamap, []);
+            $dataHandler->start($datamap, [], $this->ensureBackendUser());
             $dataHandler->process_datamap();
 
             $childUid = (int)($dataHandler->substNEWwithIDs[$newId] ?? 0);
@@ -460,18 +460,24 @@ class GeneratorService
     }
 
     /**
-     * Ensures a pseudo-admin BackendUserAuthentication exists for DataHandler in CLI context.
+     * Returns (and if necessary bootstraps) a pseudo-admin BackendUserAuthentication
+     * for DataHandler in CLI context. Passed explicitly to DataHandler::start() to
+     * bypass DI container limitations in CLI bootstrapping.
      */
-    private function ensureBackendUser(): void
+    private function ensureBackendUser(): BackendUserAuthentication
     {
-        if (isset($GLOBALS['BE_USER']) && $GLOBALS['BE_USER'] instanceof BackendUserAuthentication) {
-            return;
+        if (isset($GLOBALS['BE_USER']) && $GLOBALS['BE_USER'] instanceof BackendUserAuthentication
+            && ($GLOBALS['BE_USER']->user['admin'] ?? 0) === 1
+        ) {
+            return $GLOBALS['BE_USER'];
         }
 
         $backendUser = GeneralUtility::makeInstance(BackendUserAuthentication::class);
-        $backendUser->user = ['uid' => 0, 'admin' => 1, 'uc' => ''];
+        $backendUser->user = ['uid' => 1, 'admin' => 1, 'uc' => ''];
         $backendUser->workspace = 0;
         $GLOBALS['BE_USER'] = $backendUser;
+
+        return $backendUser;
     }
 
     private function slugify(string $value): string
