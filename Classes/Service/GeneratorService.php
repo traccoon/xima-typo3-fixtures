@@ -6,7 +6,7 @@ namespace Xima\XimaTypo3Fixtures\Service;
 
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
-use TYPO3\CMS\Core\Resource\Exception\FileDoesNotExistException;
+use TYPO3\CMS\Core\Resource\FileInterface;
 use TYPO3\CMS\Core\Resource\ResourceFactory;
 use Xima\XimaTypo3Fixtures\Domain\Model\FileFixtureReference;
 use Xima\XimaTypo3Fixtures\Domain\Model\FixtureVariant;
@@ -358,13 +358,8 @@ class GeneratorService
         FileFixtureReference $ref,
         string $tableName = 'tt_content',
     ): void {
-        try {
-            $file = $this->resourceFactory->retrieveFileOrFolderObject($ref->absolutePath);
-        } catch (FileDoesNotExistException) {
-            return;
-        }
-
-        if ($file === null || !method_exists($file, 'getUid')) {
+        $file = $this->resolveOrImportFile($ref->absolutePath);
+        if ($file === null) {
             return;
         }
 
@@ -379,6 +374,45 @@ class GeneratorService
             'crdate' => time(),
             'sorting_foreign' => 1,
         ]);
+    }
+
+    /**
+     * Tries to resolve a file via FAL. If the file lives outside any configured
+     * storage (e.g. vendor/), it is copied into fileadmin/_fixtures/ automatically.
+     */
+    private function resolveOrImportFile(string $absolutePath): ?FileInterface
+    {
+        if (!is_file($absolutePath)) {
+            return null;
+        }
+
+        // Try direct FAL lookup (works when the file is already inside a storage)
+        try {
+            $file = $this->resourceFactory->retrieveFileOrFolderObject($absolutePath);
+            if ($file instanceof FileInterface) {
+                return $file;
+            }
+        } catch (\Exception) {
+            // Fall through to import
+        }
+
+        // File is outside any storage (e.g. vendor/) — import into fileadmin/_fixtures/
+        try {
+            $storage = $this->resourceFactory->getStorageObject(1);
+            $folderIdentifier = '/_fixtures/';
+            $folder = $storage->hasFolder($folderIdentifier)
+                ? $storage->getFolder($folderIdentifier)
+                : $storage->createFolder('_fixtures');
+
+            $fileName = basename($absolutePath);
+            if ($folder->hasFile($fileName)) {
+                return $folder->getFile($fileName);
+            }
+
+            return $storage->addFile($absolutePath, $folder, $fileName);
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     private function slugify(string $value): string
