@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Xima\XimaTypo3Fixtures\Fixture;
 
+use Xima\XimaTypo3Fixtures\Domain\Model\FixtureVariant;
+
 abstract class AbstractFixture implements FixtureInterface
 {
     protected const LOREM_SHORT = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.';
@@ -18,5 +20,26 @@ abstract class AbstractFixture implements FixtureInterface
     public function getGroup(): string
     {
         return 'core';
+    }
+
+    public function getBackendLayout(): string
+    {
+        return '';
+    }
+
+    /**
+     * Default: one variant built from getFields().
+     * Override getVariants() directly for multi-variant fixtures.
+     *
+     * @return FixtureVariant[]
+     */
+    public function getVariants(): array
+    {
+        return [new FixtureVariant($this->getLabel(), $this->getFields())];
+    }
+
+    public function getFields(): array
+    {
+        return [];
     }
 }

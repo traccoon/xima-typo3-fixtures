@@ -9,6 +9,7 @@ use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Resource\Exception\FileDoesNotExistException;
 use TYPO3\CMS\Core\Resource\ResourceFactory;
 use Xima\XimaTypo3Fixtures\Domain\Model\FileFixtureReference;
+use Xima\XimaTypo3Fixtures\Domain\Model\FixtureVariant;
 use Xima\XimaTypo3Fixtures\Fixture\FixtureInterface;
 
 class GeneratorService
@@ -19,11 +20,13 @@ class GeneratorService
     ) {}
 
     /**
-     * Generates the styleguide page tree:
-     *   /_styleguide              ← root container page
-     *     /_styleguide/core       ← subpage per group
-     *     /_styleguide/my-group
-     *     …
+     * Builds a three-level styleguide page tree and populates each CE page with
+     * all variants of the corresponding fixture.
+     *
+     * Structure:
+     *   /_styleguide                     ← root container
+     *     /_styleguide/{group}           ← one page per group
+     *       /_styleguide/{group}/{ctype} ← one page per CE, N content elements (variants)
      *
      * Returns the UID of the root styleguide page.
      *
@@ -31,12 +34,12 @@ class GeneratorService
      */
     public function generate(array $fixtures, int $pid = 1, string $title = 'Styleguide'): int
     {
-        $rootUid = $this->getOrCreatePage($pid, $title, $this->buildRootSlug($title));
+        $rootSlug = '/_' . $this->slugify($title);
+        $rootUid = $this->getOrCreatePage($pid, $title, $rootSlug);
         if ($rootUid === 0) {
             return 0;
         }
 
-        // Group fixtures by their group identifier
         $groups = [];
         foreach ($fixtures as $fixture) {
             $groups[$fixture->getGroup()][] = $fixture;
@@ -44,14 +47,26 @@ class GeneratorService
 
         foreach ($groups as $group => $groupFixtures) {
             $groupTitle = $this->formatGroupTitle($group);
-            $groupSlug = $this->buildRootSlug($title) . '/' . $this->slugify($group);
+            $groupSlug = $rootSlug . '/' . $this->slugify($group);
             $groupUid = $this->getOrCreatePage($rootUid, $groupTitle, $groupSlug);
             if ($groupUid === 0) {
                 continue;
             }
-            $this->clearExistingContent($groupUid);
+
             foreach ($groupFixtures as $fixture) {
-                $this->createContentElement($groupUid, $fixture);
+                $ceTitle = $fixture->getLabel();
+                $ceSlug = $groupSlug . '/' . $this->slugify($fixture->getCType());
+                $ceUid = $this->getOrCreatePage($groupUid, $ceTitle, $ceSlug);
+                if ($ceUid === 0) {
+                    continue;
+                }
+
+                $this->setBackendLayout($ceUid, $fixture->getBackendLayout());
+                $this->clearExistingContent($ceUid);
+
+                foreach ($fixture->getVariants() as $variant) {
+                    $this->createContentElement($ceUid, $fixture->getCType(), $variant);
+                }
             }
         }
 
@@ -103,6 +118,19 @@ class GeneratorService
         return (int)($uid ?: 0);
     }
 
+    private function setBackendLayout(int $uid, string $backendLayout): void
+    {
+        if ($backendLayout === '') {
+            return;
+        }
+
+        $this->connectionPool->getConnectionForTable('pages')->update(
+            'pages',
+            ['backend_layout' => $backendLayout],
+            ['uid' => $uid],
+        );
+    }
+
     private function clearExistingContent(int $pid): void
     {
         $this->connectionPool->getConnectionForTable('tt_content')->update(
@@ -112,13 +140,12 @@ class GeneratorService
         );
     }
 
-    private function createContentElement(int $pid, FixtureInterface $fixture): void
+    private function createContentElement(int $pid, string $cType, FixtureVariant $variant): void
     {
-        $allFields = $fixture->getFields();
-
         $fileReferences = [];
         $scalarFields = [];
-        foreach ($allFields as $fieldName => $value) {
+
+        foreach ($variant->fields as $fieldName => $value) {
             if ($value instanceof FileFixtureReference) {
                 $fileReferences[$fieldName] = $value;
             } else {
@@ -130,10 +157,15 @@ class GeneratorService
             $scalarFields[$fieldName] = ($scalarFields[$fieldName] ?? 0) + 1;
         }
 
+        // Use variant label as CE header if no header field is set
+        if (!isset($scalarFields['header'])) {
+            $scalarFields['header'] = $variant->label;
+        }
+
         $row = array_merge(
             [
                 'pid' => $pid,
-                'CType' => $fixture->getCType(),
+                'CType' => $cType,
                 'colPos' => 0,
                 'hidden' => 0,
                 'tstamp' => time(),
@@ -142,6 +174,7 @@ class GeneratorService
             $scalarFields,
         );
 
+        // CType must come from the fixture field itself or be set by caller
         $connection = $this->connectionPool->getConnectionForTable('tt_content');
         $connection->insert('tt_content', $row);
         $contentElementUid = (int)$connection->lastInsertId();
@@ -176,18 +209,6 @@ class GeneratorService
         ]);
     }
 
-    /**
-     * Builds the root slug: /_styleguide (with underscore prefix).
-     */
-    private function buildRootSlug(string $title): string
-    {
-        return '/_' . $this->slugify($title);
-    }
-
-    /**
-     * Converts a string to a URL-safe slug segment.
-     * Example: "dkfz_common" → "dkfz-common", "My Group" → "my-group"
-     */
     private function slugify(string $value): string
     {
         $slug = strtolower($value);
@@ -196,10 +217,6 @@ class GeneratorService
         return trim($slug, '-');
     }
 
-    /**
-     * Converts a group identifier to a human-readable title.
-     * Example: "dkfz_common" → "Dkfz Common", "core" → "Core"
-     */
     private function formatGroupTitle(string $group): string
     {
         return ucwords(str_replace(['_', '-'], ' ', $group));
