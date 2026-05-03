@@ -47,7 +47,7 @@ class ContentBlocksLoader
                 continue;
             }
 
-            foreach (glob($contentBlocksPath . '*/config.yaml') ?: [] as $configFile) {
+            foreach (glob($contentBlocksPath . '{*/,*/*/}config.yaml', GLOB_BRACE) ?: [] as $configFile) {
                 $fixture = $this->createFixtureFromConfigFile($configFile);
                 if ($fixture !== null) {
                     $fixtures[] = $fixture;
