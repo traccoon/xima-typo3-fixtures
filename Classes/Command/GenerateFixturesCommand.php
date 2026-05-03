@@ -85,6 +85,20 @@ class GenerateFixturesCommand extends Command
 
         $pageUid = $this->generatorService->generate(array_values($fixtures), $pid, $title);
 
+        $errors = $this->generatorService->getGenerationErrors();
+        foreach ($errors as $cType => $message) {
+            $io->writeln(sprintf('  <error>✘</error> <options=bold>%s</> — %s', $cType, $message));
+        }
+
+        if ($errors !== []) {
+            $io->warning(sprintf(
+                '%d fixture(s) failed. Styleguide page created (UID: %d) with partial content.',
+                count($errors),
+                $pageUid,
+            ));
+            return Command::FAILURE;
+        }
+
         $io->success(sprintf('Styleguide page generated successfully (UID: %d).', $pageUid));
 
         return Command::SUCCESS;

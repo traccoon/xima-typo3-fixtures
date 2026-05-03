@@ -4,16 +4,22 @@ declare(strict_types=1);
 
 namespace Xima\XimaTypo3Fixtures\Service;
 
+use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
+use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Resource\FileInterface;
 use TYPO3\CMS\Core\Resource\ResourceFactory;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 use Xima\XimaTypo3Fixtures\Domain\Model\FileFixtureReference;
 use Xima\XimaTypo3Fixtures\Domain\Model\FixtureVariant;
 use Xima\XimaTypo3Fixtures\Fixture\FixtureInterface;
 
 class GeneratorService
 {
+    /** @var array<string, string> CType → error message, populated during generate() */
+    private array $generationErrors = [];
+
     public function __construct(
         private readonly ConnectionPool $connectionPool,
         private readonly ResourceFactory $resourceFactory,
@@ -34,6 +40,9 @@ class GeneratorService
      */
     public function generate(array $fixtures, int $pid = 1, string $title = 'Styleguide'): int
     {
+        $this->generationErrors = [];
+        $this->ensureBackendUser();
+
         $rootSlug = '/_' . $this->slugify($title);
         $rootUid = $this->getOrCreatePage($pid, $title, $rootSlug);
         if ($rootUid === 0) {
@@ -54,23 +63,37 @@ class GeneratorService
             }
 
             foreach ($groupFixtures as $fixture) {
-                $ceTitle = $fixture->getLabel();
-                $ceSlug = $groupSlug . '/' . $this->slugify($fixture->getCType());
-                $ceUid = $this->getOrCreatePage($groupUid, $ceTitle, $ceSlug);
-                if ($ceUid === 0) {
-                    continue;
-                }
+                try {
+                    $ceTitle = $fixture->getLabel();
+                    $ceSlug = $groupSlug . '/' . $this->slugify($fixture->getCType());
+                    $ceUid = $this->getOrCreatePage($groupUid, $ceTitle, $ceSlug);
+                    if ($ceUid === 0) {
+                        continue;
+                    }
 
-                $this->setBackendLayout($ceUid, $fixture->getBackendLayout());
-                $this->clearExistingContent($ceUid);
+                    $this->setBackendLayout($ceUid, $fixture->getBackendLayout());
+                    $this->clearExistingContent($ceUid);
 
-                foreach ($fixture->getVariants() as $variant) {
-                    $this->createContentElement($ceUid, $fixture->getCType(), $variant);
+                    foreach ($fixture->getVariants() as $variant) {
+                        $this->createContentElement($ceUid, $fixture->getCType(), $variant);
+                    }
+                } catch (\Throwable $e) {
+                    $this->generationErrors[$fixture->getCType()] = $e->getMessage();
                 }
             }
         }
 
         return $rootUid;
+    }
+
+    /**
+     * Returns errors collected during the last generate() call, keyed by CType.
+     *
+     * @return array<string, string>
+     */
+    public function getGenerationErrors(): array
+    {
+        return $this->generationErrors;
     }
 
     private function getOrCreatePage(int $pid, string $title, string $slug): int
@@ -79,7 +102,7 @@ class GeneratorService
         if ($existingUid > 0) {
             $this->connectionPool->getConnectionForTable('pages')->update(
                 'pages',
-                ['slug' => $slug, 'tstamp' => time()],
+                ['slug' => $slug, 'hidden' => 1, 'nav_hide' => 1, 'tstamp' => time()],
                 ['uid' => $existingUid],
             );
             return $existingUid;
@@ -90,7 +113,8 @@ class GeneratorService
             'pid' => $pid,
             'title' => $title,
             'slug' => $slug,
-            'hidden' => 0,
+            'hidden' => 1,
+            'nav_hide' => 1,
             'doktype' => 1,
             'sorting' => 256,
             'tstamp' => time(),
@@ -257,35 +281,47 @@ class GeneratorService
             }
         }
 
+        // FAL count fields — DataHandler does not manage these for us
         foreach ($fileReferences as $fieldName => $ref) {
             $scalarFields[$fieldName] = ($scalarFields[$fieldName] ?? 0) + 1;
         }
 
-        // Inline (IRRE) collection count fields
+        // IRRE collection count fields
         foreach ($variant->collections as $fieldName => $items) {
             $scalarFields[$fieldName] = count($items);
         }
 
-        // Use variant label as CE header if no header field is set
         if (!isset($scalarFields['header'])) {
             $scalarFields['header'] = $variant->label;
         }
 
-        $row = array_merge(
-            [
-                'pid' => $pid,
-                'CType' => $cType,
-                'colPos' => 0,
-                'hidden' => 0,
-                'tstamp' => time(),
-                'crdate' => time(),
-            ],
-            $scalarFields,
-        );
+        $newId = 'NEW_' . uniqid('ce_', true);
 
-        $connection = $this->connectionPool->getConnectionForTable('tt_content');
-        $connection->insert('tt_content', $row);
-        $contentElementUid = (int)$connection->lastInsertId();
+        $datamap = [
+            'tt_content' => [
+                $newId => array_merge(
+                    ['pid' => $pid, 'CType' => $cType, 'colPos' => 0, 'hidden' => 0],
+                    $scalarFields,
+                ),
+            ],
+        ];
+
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start($datamap, []);
+        $dataHandler->process_datamap();
+
+        if ($dataHandler->errorLog !== []) {
+            throw new \RuntimeException(sprintf(
+                'DataHandler error for CType "%s": %s',
+                $cType,
+                implode('; ', $dataHandler->errorLog),
+            ));
+        }
+
+        $contentElementUid = (int)($dataHandler->substNEWwithIDs[$newId] ?? 0);
+        if ($contentElementUid === 0) {
+            throw new \RuntimeException(sprintf('DataHandler returned no UID for CType "%s".', $cType));
+        }
 
         foreach ($fileReferences as $ref) {
             $this->createFileReference($contentElementUid, $ref);
@@ -297,8 +333,8 @@ class GeneratorService
     }
 
     /**
-     * Creates IRRE child records for an inline collection field.
-     * Looks up foreign_table and foreign_field from TCA to avoid hard-coding.
+     * Creates IRRE child records for an inline collection field via DataHandler.
+     * Resolves foreign_table and foreign_field from TCA.
      *
      * @param array<int, array<string, mixed>> $items
      */
@@ -314,8 +350,6 @@ class GeneratorService
         if ($foreignTable === '') {
             return;
         }
-
-        $connection = $this->connectionPool->getConnectionForTable($foreignTable);
 
         foreach ($items as $sorting => $item) {
             $fileReferences = [];
@@ -333,19 +367,30 @@ class GeneratorService
                 $scalarFields[$col] = ($scalarFields[$col] ?? 0) + 1;
             }
 
-            $connection->insert($foreignTable, array_merge(
-                [
-                    'pid' => $pid,
-                    $foreignField => $ceUid,
-                    'sorting' => ($sorting + 1) * 256,
-                    'hidden' => 0,
-                    'tstamp' => time(),
-                    'crdate' => time(),
-                ],
-                $scalarFields,
-            ));
+            $newId = 'NEW_' . uniqid('child_', true);
 
-            $childUid = (int)$connection->lastInsertId();
+            $datamap = [
+                $foreignTable => [
+                    $newId => array_merge(
+                        [
+                            'pid' => $pid,
+                            $foreignField => $ceUid,
+                            'sorting' => ($sorting + 1) * 256,
+                            'hidden' => 0,
+                        ],
+                        $scalarFields,
+                    ),
+                ],
+            ];
+
+            $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+            $dataHandler->start($datamap, []);
+            $dataHandler->process_datamap();
+
+            $childUid = (int)($dataHandler->substNEWwithIDs[$newId] ?? 0);
+            if ($childUid === 0) {
+                continue;
+            }
 
             foreach ($fileReferences as $ref) {
                 $this->createFileReference($childUid, $ref, $foreignTable);
@@ -412,6 +457,21 @@ class GeneratorService
         } catch (\Exception) {
             return null;
         }
+    }
+
+    /**
+     * Ensures a pseudo-admin BackendUserAuthentication exists for DataHandler in CLI context.
+     */
+    private function ensureBackendUser(): void
+    {
+        if (isset($GLOBALS['BE_USER']) && $GLOBALS['BE_USER'] instanceof BackendUserAuthentication) {
+            return;
+        }
+
+        $backendUser = GeneralUtility::makeInstance(BackendUserAuthentication::class);
+        $backendUser->user = ['uid' => 0, 'admin' => 1, 'uc' => ''];
+        $backendUser->workspace = 0;
+        $GLOBALS['BE_USER'] = $backendUser;
     }
 
     private function slugify(string $value): string
