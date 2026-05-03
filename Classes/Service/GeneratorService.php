@@ -45,6 +45,12 @@ class GeneratorService
     {
         $existingUid = $this->findStyleguidePage($pid, $title);
         if ($existingUid > 0) {
+            // Ensure slug is correct even if the page was created by an older version
+            $this->connectionPool->getConnectionForTable('pages')->update(
+                'pages',
+                ['slug' => $this->buildSlug($pid, $title), 'tstamp' => time()],
+                ['uid' => $existingUid],
+            );
             return $existingUid;
         }
 
