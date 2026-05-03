@@ -24,6 +24,12 @@ use Xima\XimaTypo3Fixtures\Fixture\FixtureInterface;
  *     fixture: 'EXT:my_ext/Resources/Public/Images/example.jpg'
  *
  * Omit the fixture property to skip a field entirely.
+ *
+ * Field prefixing (ContentBlocks prefixFields / prefixType):
+ *   - useExistingField: true  → column name = identifier (no prefix)
+ *   - prefixType: vendor      → column name = {vendor}_{identifier}
+ *   - prefixType: full        → column name = {vendor}_{blockSlug}_{identifier}
+ *   - no prefixing            → column name = identifier
  */
 class ContentBlocksLoader
 {
@@ -65,7 +71,8 @@ class ContentBlocksLoader
             return null;
         }
 
-        $fields = $this->extractFixtureFields($config['fields'] ?? []);
+        $prefixInfo = $this->resolvePrefixInfo($config);
+        $fields = $this->extractFixtureFields($config['fields'] ?? [], $prefixInfo);
         if (empty($fields)) {
             return null;
         }
@@ -105,13 +112,50 @@ class ContentBlocksLoader
     }
 
     /**
+     * Resolves the column-name prefix strategy from the block config.
+     *
+     * Returns an array with:
+     *   'prefix' => string  — the prefix to prepend (empty string = no prefix)
+     *
+     * ContentBlocks prefixing rules:
+     *   prefixFields: false (default) → no prefix
+     *   prefixFields: true, prefixType: vendor → {vendor}_
+     *   prefixFields: true, prefixType: full   → {vendor}_{blockSlug}_
+     *
+     * @param array<string, mixed> $config
+     * @return array{prefix: string}
+     */
+    private function resolvePrefixInfo(array $config): array
+    {
+        if (empty($config['prefixFields'])) {
+            return ['prefix' => ''];
+        }
+
+        $name = (string)$config['name'];
+        [$vendor, $block] = array_pad(explode('/', $name, 2), 2, '');
+        $vendor = strtolower($vendor);
+
+        $prefixType = strtolower((string)($config['prefixType'] ?? 'vendor'));
+
+        if ($prefixType === 'full') {
+            $blockSlug = strtolower(str_replace(['-', '/'], '', $block));
+            return ['prefix' => $vendor . '_' . $blockSlug . '_'];
+        }
+
+        // Default: vendor
+        return ['prefix' => $vendor . '_'];
+    }
+
+    /**
      * Extracts fields that have a 'fixture' property and resolves their values.
+     * Applies the correct tt_content column name based on prefixing rules.
      * File-type fields return FileFixtureReference objects; all others return scalars.
      *
      * @param array<mixed> $fieldDefinitions
+     * @param array{prefix: string} $prefixInfo
      * @return array<string, mixed>
      */
-    private function extractFixtureFields(array $fieldDefinitions): array
+    private function extractFixtureFields(array $fieldDefinitions, array $prefixInfo): array
     {
         $fields = [];
         foreach ($fieldDefinitions as $field) {
@@ -120,15 +164,20 @@ class ContentBlocksLoader
             }
 
             $identifier = (string)$field['identifier'];
+            $useExisting = !empty($field['useExistingField']);
+
+            // Determine the actual tt_content column name
+            $columnName = $useExisting ? $identifier : $prefixInfo['prefix'] . $identifier;
+
             $isFileField = in_array($field['type'] ?? '', self::FILE_FIELD_TYPES, true);
 
             if ($isFileField) {
-                $ref = $this->resolveFileReference((string)$field['fixture'], $identifier);
+                $ref = $this->resolveFileReference((string)$field['fixture'], $columnName);
                 if ($ref !== null) {
-                    $fields[$identifier] = $ref;
+                    $fields[$columnName] = $ref;
                 }
             } else {
-                $fields[$identifier] = $this->resolveTextValue($field['fixture']);
+                $fields[$columnName] = $this->resolveTextValue($field['fixture']);
             }
         }
         return $fields;
